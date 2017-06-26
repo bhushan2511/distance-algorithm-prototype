@@ -1,181 +1,152 @@
 package us.brianolsen.justgo.osm;
 
 import java.io.BufferedReader;
-import java.io.DataOutputStream;
-import java.io.FileReader;
 import java.io.IOException;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.net.URLEncoder;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.ParserConfigurationException;
+import org.apache.commons.graph.domain.basic.UndirectedGraphImpl;
+import org.apache.http.HttpResponse;
+import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.HttpClient;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.impl.client.HttpClientBuilder;
 
-//import org.osm.lights.upload.BasicAuthenticator;
-import org.w3c.dom.Document;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
-import org.xml.sax.SAXException;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 
+import us.brianolsen.justgo.graph.model.OSMEdge;
 import us.brianolsen.justgo.graph.model.OSMVertex;
-
 
 public class OSMWrapperAPI {
 
 	private static final String OVERPASS_API = "http://www.overpass-api.de/api/interpreter";
-	private static final String OPENSTREETMAP_API_06 = "http://www.openstreetmap.org/api/0.6/";
+	
+	public static void main(String[] args) throws ClientProtocolException, URISyntaxException, IOException {
+		String query = buildQueryString(41.70752269548981, -87.75063514709473, 41.72036884468498, -87.72698879241943);
+		System.out.println(query);
+		String resultJson = getNodesViaOverpass(query);
 
-//	public static OSMNode getNode(String nodeId) throws IOException, ParserConfigurationException, SAXException {
-//		String string = "http://www.openstreetmap.org/api/0.6/node/" + nodeId;
-//		URL osm = new URL(string);
-//		HttpURLConnection connection = (HttpURLConnection) osm.openConnection();
-//
-//		DocumentBuilderFactory dbfac = DocumentBuilderFactory.newInstance();
-//		DocumentBuilder docBuilder = dbfac.newDocumentBuilder();
-//		Document document = docBuilder.parse(connection.getInputStream());
-//		List<OSMNode> nodes = getNodes(document);
-//		if (!nodes.isEmpty()) {
-//			return nodes.iterator().next();
-//		}
-//		return null;
-//	}
-
-
-	@SuppressWarnings("nls")
-	private static Document getXML(double lon, double lat, double vicinityRange) throws IOException, SAXException,
-			ParserConfigurationException {
-
-		DecimalFormat format = new DecimalFormat("##0.0000000", DecimalFormatSymbols.getInstance(Locale.ENGLISH)); //$NON-NLS-1$
-		String left = format.format(lat - vicinityRange);
-		String bottom = format.format(lon - vicinityRange);
-		String right = format.format(lat + vicinityRange);
-		String top = format.format(lon + vicinityRange);
-
-		String string = OPENSTREETMAP_API_06 + "map?bbox=" + left + "," + bottom + "," + right + ","
-				+ top;
-		URL osm = new URL(string);
-		HttpURLConnection connection = (HttpURLConnection) osm.openConnection();
-
-		DocumentBuilderFactory dbfac = DocumentBuilderFactory.newInstance();
-		DocumentBuilder docBuilder = dbfac.newDocumentBuilder();
-		return docBuilder.parse(connection.getInputStream());
-	}
-
-	public static Document getXMLFile(String location) throws ParserConfigurationException, SAXException, IOException {
-		DocumentBuilderFactory dbfac = DocumentBuilderFactory.newInstance();
-		DocumentBuilder docBuilder = dbfac.newDocumentBuilder();
-		return docBuilder.parse(location);
-	}
-
-	public static List<OSMVertex> getNodes(Document xmlDocument) {
-		List<OSMVertex> osmNodes = new ArrayList<OSMVertex>();
-
-		// Document xml = getXML(8.32, 49.001);
-		Node osmRoot = xmlDocument.getFirstChild();
-		NodeList osmXMLNodes = osmRoot.getChildNodes();
-		for (int i = 1; i < osmXMLNodes.getLength(); i++) {
-			Node item = osmXMLNodes.item(i);
-			if (item.getNodeName().equals("node")) {
-				NamedNodeMap attributes = item.getAttributes();
-				NodeList tagXMLNodes = item.getChildNodes();
-				Map<String, String> tags = new HashMap<String, String>();
-				for (int j = 1; j < tagXMLNodes.getLength(); j++) {
-					Node tagItem = tagXMLNodes.item(j);
-					NamedNodeMap tagAttributes = tagItem.getAttributes();
-					if (tagAttributes != null) {
-						tags.put(tagAttributes.getNamedItem("k").getNodeValue(), tagAttributes.getNamedItem("v")
-								.getNodeValue());
-					}
-				}
-				Node namedItemID = attributes.getNamedItem("id");
-				Node namedItemLat = attributes.getNamedItem("lat");
-				Node namedItemLon = attributes.getNamedItem("lon");
-				Node namedItemVersion = attributes.getNamedItem("version");
-
-				String id = namedItemID.getNodeValue();
-				String latitude = namedItemLat.getNodeValue();
-				String longitude = namedItemLon.getNodeValue();
-				String version = "0";
-				if (namedItemVersion != null) {
-					version = namedItemVersion.getNodeValue();
-				}
-
-				osmNodes.add(new OSMVertex(id, latitude, longitude, version, tags));
-			}
-
-		}
-		return osmNodes;
-	}
-
-	public static List<OSMVertex> getOSMNodesInVicinity(double lat, double lon, double vicinityRange) throws IOException,
-			SAXException, ParserConfigurationException {
-		return OSMWrapperAPI.getNodes(getXML(lon, lat, vicinityRange));
-	}
-
-
-	public static Document getNodesViaOverpass(String query) throws IOException, ParserConfigurationException, SAXException {
-		String hostname = OVERPASS_API;
-		String queryString = readFileAsString(query);
-
-		URL osm = new URL(hostname);
-		HttpURLConnection connection = (HttpURLConnection) osm.openConnection();
-		connection.setDoInput(true);
-		connection.setDoOutput(true);
-		connection.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-
-		DataOutputStream printout = new DataOutputStream(connection.getOutputStream());
-		printout.writeBytes("data=" + URLEncoder.encode(queryString, "utf-8"));
-		printout.flush();
-		printout.close();
-
-		DocumentBuilderFactory dbfac = DocumentBuilderFactory.newInstance();
-		DocumentBuilder docBuilder = dbfac.newDocumentBuilder();
-		return docBuilder.parse(connection.getInputStream());
-	}
-
-	private static String readFileAsString(String filePath) throws java.io.IOException {
-		StringBuffer fileData = new StringBuffer(1000);
-		BufferedReader reader = new BufferedReader(new FileReader(filePath));
-		char[] buf = new char[1024];
-		int numRead = 0;
-		while ((numRead = reader.read(buf)) != -1) {
-			String readData = String.valueOf(buf, 0, numRead);
-			fileData.append(readData);
-			buf = new char[1024];
-		}
-		reader.close();
-		return fileData.toString();
-	}
-
-	public static void main(String[] args) throws IOException, SAXException, ParserConfigurationException {
-//	    final Authenticator authenticator = new Authenticator()
-//	    {
-//
-//	        @Override
-//	        protected PasswordAuthentication getPasswordAuthentication()
-//	        {
-//	            return new PasswordAuthentication( "username", "password".toCharArray() );
-//	        }
-//
-//	    };
-//	    // not exactly pretty but this is how org.eclipse.core.net does it
-//	    Authenticator.setDefault( authenticator );
+		System.out.println(toPrettyFormat(resultJson));
 		
-		List<OSMVertex> osmNodesInVicinity = getOSMNodesInVicinity(49, 8.3, 0.005);
-		for (OSMVertex vertex : osmNodesInVicinity) {
+		UndirectedGraphImpl graph = convertJsonToGraph(resultJson);
+		
+		for(Object vertex: graph.getVertices()){
 			System.out.println(vertex);
 		}
+		for(Object edge: graph.getEdges()){
+			System.out.println(edge);
+		}
+
+	}
+
+	public static String getNodesViaOverpass(String query)
+			throws URISyntaxException, ClientProtocolException, IOException {
+		StringBuilder result = new StringBuilder();
+
+		URI uri = new URIBuilder(OVERPASS_API).addParameter("data", query).build();
+		HttpClient client = HttpClientBuilder.create().build();
+		HttpGet request = new HttpGet(uri);
+		HttpResponse response = client.execute(request);
+		System.out.println("Response Code : " + response.getStatusLine().getStatusCode());
+
+		BufferedReader rd = new BufferedReader(new InputStreamReader(response.getEntity().getContent()));
+		String line;
+		while ((line = rd.readLine()) != null) {
+			result.append(line);
+		}
+		rd.close();
+		return result.toString();
+	}
+
+
+	public static String buildQueryString(Double south, Double west, Double north, Double east) {
+		String bboxString = buildBboxString(south, west, north, east);
+		StringBuilder sb = new StringBuilder();
+		sb.append("[out:json]");
+		sb.append("[bbox:");
+		sb.append(bboxString);
+		sb.append("];");
+		sb.append("way[highway];");
+		sb.append("out geom;");
+		return sb.toString();
+	}
+
+	public static String buildBboxString(Double south, Double west, Double north, Double east) {
+		StringBuilder sb = new StringBuilder();
+		DecimalFormat format = new DecimalFormat("##0.0000000", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
+		sb.append(format.format(south));
+		sb.append(",");
+		sb.append(format.format(west));
+		sb.append(",");
+		sb.append(format.format(north));
+		sb.append(",");
+		sb.append(format.format(east));
+		return sb.toString();
+	}
+
+	public static String toPrettyFormat(String jsonString) {
+		JsonObject json = parse(jsonString).getAsJsonObject();
+
+		Gson gson = new GsonBuilder().setPrettyPrinting().create();
+		String prettyJson = gson.toJson(json);
+
+		return prettyJson;
 	}
 	
+	
+	public static UndirectedGraphImpl convertJsonToGraph(String jsonString){
+		UndirectedGraphImpl graph = new UndirectedGraphImpl();
+		JsonElement jsonElement = parse(jsonString);
+		JsonArray elements = jsonElement.getAsJsonObject().get("elements").getAsJsonArray();
+		
+		for(JsonElement element: elements){
+			JsonObject object = element.getAsJsonObject();
+			JsonArray nodeIds = object.get("nodes").getAsJsonArray();
+			JsonArray locations = object.get("geometry").getAsJsonArray();
+			Map<String, String> tags = new GsonBuilder().create().fromJson(object.get("tags"), Map.class);
+			OSMVertex v2 = null;
+			
+			for(int i = 0; i < nodeIds.size(); i++){
+				int id = nodeIds.get(i).getAsInt();
+				JsonObject location = locations.get(i).getAsJsonObject();
+				Double latitude = location.get("lat").getAsDouble();
+				Double longitude = location.get("lon").getAsDouble();
+				OSMVertex v1 = new OSMVertex(id, latitude, longitude, tags);
+				
+				
+				//TODO if(graph.getVertices().contains(v1)) { // connect ways }
+				
+				graph.addVertex(v1);
+				if(i > 0){
+					graph.addEdge(new OSMEdge(v1, v2));
+				}
+				v2 = v1;
+			}
+			
+			
+		}
+		//
+		//osmNodes.add(new OSMVertex(id, latitude, longitude, version, tags));
+		return graph;
+	}
+
+	public static JsonElement parse(String json) {
+		JsonParser parser = new JsonParser();
+		return parser.parse(json);
+	}
+	
+
+
+
 }
-
-
